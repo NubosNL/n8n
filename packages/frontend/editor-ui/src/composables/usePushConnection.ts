@@ -18,7 +18,7 @@ import type { PushMessage } from '@n8n/api-types';
 
 import { useNodeHelpers } from '@/composables/useNodeHelpers';
 import { useToast } from '@/composables/useToast';
-import { AI_CREDITS_EXPERIMENT, WORKFLOW_SETTINGS_MODAL_KEY } from '@/constants';
+import { WORKFLOW_SETTINGS_MODAL_KEY } from '@/constants';
 import { getTriggerNodeServiceName } from '@/utils/nodeTypesUtils';
 import { codeNodeEditorEventBus, globalLinkActionsEventBus } from '@/event-bus';
 import { useUIStore } from '@/stores/ui.store';
@@ -37,7 +37,6 @@ import { useAssistantStore } from '@/stores/assistant.store';
 import NodeExecutionErrorMessage from '@/components/NodeExecutionErrorMessage.vue';
 import type { IExecutionResponse } from '@/Interface';
 import { clearPopupWindowState, hasTrimmedData, hasTrimmedItem } from '../utils/executionUtils';
-import { usePostHog } from '@/stores/posthog.store';
 import { getEasyAiWorkflowJson } from '@/utils/easyAiWorkflowUtils';
 import { useSchemaPreviewStore } from '@/stores/schemaPreview.store';
 
@@ -56,7 +55,6 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 	const uiStore = useUIStore();
 	const workflowsStore = useWorkflowsStore();
 	const assistantStore = useAssistantStore();
-	const posthogStore = usePostHog();
 
 	const retryTimeout = ref<NodeJS.Timeout | null>(null);
 	const pushMessageQueue = ref<PushMessageQueueItem[]>([]);
@@ -151,6 +149,12 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 			return false;
 		}
 
+		if (receivedData.type === 'executionStarted') {
+			if (!workflowsStore.activeExecutionId) {
+				workflowsStore.setActiveExecutionId(receivedData.data.executionId);
+			}
+		}
+
 		if (
 			receivedData.type === 'nodeExecuteAfter' ||
 			receivedData.type === 'nodeExecuteBefore' ||
@@ -208,12 +212,7 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 				clearPopupWindowState();
 				const workflow = workflowsStore.getWorkflowById(receivedData.data.workflowId);
 				if (workflow?.meta?.templateId) {
-					const isAiCreditsExperimentEnabled =
-						posthogStore.getVariant(AI_CREDITS_EXPERIMENT.name) === AI_CREDITS_EXPERIMENT.variant;
-					const easyAiWorkflowJson = getEasyAiWorkflowJson({
-						isInstanceInAiFreeCreditsExperiment: isAiCreditsExperimentEnabled,
-						withOpenAiFreeCredits: settingsStore.aiCreditsQuota,
-					});
+					const easyAiWorkflowJson = getEasyAiWorkflowJson();
 					const isEasyAIWorkflow = workflow.meta.templateId === easyAiWorkflowJson.meta.templateId;
 					if (isEasyAIWorkflow) {
 						telemetry.track(
@@ -228,8 +227,7 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 			}
 
 			const { executionId } = receivedData.data;
-			const { activeExecutionId } = workflowsStore;
-			if (executionId !== activeExecutionId) {
+			if (executionId !== workflowsStore.activeExecutionId) {
 				// The workflow which did finish execution did either not get started
 				// by this session or we do not have the execution id yet.
 				if (isRetry !== true) {
@@ -240,10 +238,20 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 
 			let showedSuccessToast = false;
 
-			let executionData: Pick<IExecutionResponse, 'workflowId' | 'data' | 'status'>;
+			let executionData: Pick<
+				IExecutionResponse,
+				'workflowId' | 'data' | 'status' | 'startedAt' | 'stoppedAt' | 'workflowData'
+			>;
 			if (receivedData.type === 'executionFinished' && receivedData.data.rawData) {
 				const { workflowId, status, rawData } = receivedData.data;
-				executionData = { workflowId, data: parse(rawData), status };
+				executionData = {
+					workflowId,
+					workflowData: workflowsStore.workflow,
+					data: parse(rawData),
+					status,
+					startedAt: workflowsStore.workflowExecutionData?.startedAt ?? new Date(),
+					stoppedAt: new Date(),
+				};
 			} else {
 				uiStore.setProcessingExecutionResults(true);
 
@@ -276,8 +284,11 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 
 					executionData = {
 						workflowId: execution.workflowId,
+						workflowData: workflowsStore.workflow,
 						data: parse(execution.data as unknown as string),
 						status: execution.status,
+						startedAt: workflowsStore.workflowExecutionData?.startedAt as Date,
+						stoppedAt: receivedData.type === 'executionFinished' ? new Date() : undefined,
 					};
 				} catch {
 					uiStore.setProcessingExecutionResults(false);
@@ -311,7 +322,7 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 				runDataExecutedErrorMessage = i18n.baseText(
 					'executionsList.showMessage.stopExecution.message',
 					{
-						interpolate: { activeExecutionId },
+						interpolate: { activeExecutionId: workflowsStore.activeExecutionId },
 					},
 				);
 			}
@@ -494,6 +505,13 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 			}
 
 			workflowsStore.executingNode.length = 0;
+
+			if (receivedData.type === 'executionFinished') {
+				// As a temporary workaround for https://linear.app/n8n/issue/PAY-2762,
+				// remove runs that is still 'running' status when execution is finished
+				executionData = removeRunningTaskData(executionData as IExecutionResponse);
+			}
+
 			workflowsStore.setWorkflowExecutionData(executionData as IExecutionResponse);
 			uiStore.removeActiveAction('workflowRunning');
 
@@ -511,6 +529,8 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 				itemsCount =
 					iRunExecutionData.resultData.runData[lastNodeExecuted][0].data!.main[0]!.length;
 			}
+
+			workflowsStore.setActiveExecutionId(null);
 
 			void useExternalHooks().run('pushConnection.executionFinished', {
 				itemsCount,
@@ -551,8 +571,7 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 			void useSchemaPreviewStore().trackSchemaPreviewExecution(pushData);
 		} else if (receivedData.type === 'nodeExecuteBefore') {
 			// A node started to be executed. Set it as executing.
-			const pushData = receivedData.data;
-			workflowsStore.addExecutingNode(pushData.nodeName);
+			workflowsStore.setNodeExecuting(receivedData.data);
 		} else if (receivedData.type === 'testWebhookDeleted') {
 			// A test-webhook was deleted
 			const pushData = receivedData.data;
@@ -567,7 +586,7 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 
 			if (pushData.workflowId === workflowsStore.workflowId) {
 				workflowsStore.executionWaitingForWebhook = false;
-				workflowsStore.activeExecutionId = pushData.executionId;
+				workflowsStore.setActiveExecutionId(pushData.executionId);
 			}
 
 			void processWaitingPushMessages();
@@ -633,5 +652,29 @@ export function usePushConnection({ router }: { router: ReturnType<typeof useRou
 		processWaitingPushMessages,
 		pushMessageQueue,
 		retryTimeout,
+	};
+}
+
+function removeRunningTaskData(execution: IExecutionResponse): IExecutionResponse {
+	if (!execution.data) {
+		return execution;
+	}
+
+	return {
+		...execution,
+		data: {
+			...execution.data,
+			resultData: {
+				...execution.data.resultData,
+				runData: Object.fromEntries(
+					Object.entries(execution.data.resultData.runData)
+						.map(([nodeName, runs]) => [
+							nodeName,
+							runs.filter((run) => run.executionStatus !== 'running'),
+						])
+						.filter(([, runs]) => runs.length > 0),
+				),
+			},
+		},
 	};
 }
