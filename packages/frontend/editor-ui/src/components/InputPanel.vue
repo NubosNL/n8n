@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { useI18n } from '@/composables/useI18n';
+import { useI18n } from '@n8n/i18n';
 import { useTelemetry } from '@/composables/useTelemetry';
 import {
 	CRON_NODE_TYPE,
@@ -8,8 +8,8 @@ import {
 	START_NODE_TYPE,
 } from '@/constants';
 import { useNodeTypesStore } from '@/stores/nodeTypes.store';
-import { useUIStore } from '@/stores/ui.store';
 import { useWorkflowsStore } from '@/stores/workflows.store';
+import { useNDVStore } from '@/stores/ndv.store';
 import { waitingNodeTooltip } from '@/utils/executionUtils';
 import { uniqBy } from 'lodash-es';
 import { N8nIcon, N8nRadioButtons, N8nText, N8nTooltip } from '@n8n/design-system';
@@ -23,7 +23,6 @@ import {
 } from 'n8n-workflow';
 import { storeToRefs } from 'pinia';
 import { computed, ref, watch } from 'vue';
-import { useNDVStore } from '../stores/ndv.store';
 import InputNodeSelect from './InputNodeSelect.vue';
 import NodeExecuteButton from './NodeExecuteButton.vue';
 import RunData from './RunData.vue';
@@ -90,7 +89,6 @@ const inputModes = [
 const nodeTypesStore = useNodeTypesStore();
 const ndvStore = useNDVStore();
 const workflowsStore = useWorkflowsStore();
-const uiStore = useUIStore();
 
 const {
 	activeNode,
@@ -166,7 +164,7 @@ const isMappingEnabled = computed(() => {
 	return true;
 });
 const isExecutingPrevious = computed(() => {
-	if (!workflowRunning.value) {
+	if (!workflowsStore.isWorkflowRunning) {
 		return false;
 	}
 	const triggeredNode = workflowsStore.executedNode;
@@ -187,7 +185,6 @@ const isExecutingPrevious = computed(() => {
 	}
 	return false;
 });
-const workflowRunning = computed(() => uiStore.isActionActive.workflowRunning);
 
 const rootNodesParents = computed(() => {
 	if (!rootNode.value) return [];
@@ -510,7 +507,9 @@ function activatePane() {
 		</template>
 
 		<template #node-waiting>
-			<N8nText :bold="true" color="text-dark" size="large">Waiting for input</N8nText>
+			<N8nText :bold="true" color="text-dark" size="large">
+				{{ i18n.baseText('ndv.output.waitNodeWaiting.title') }}
+			</N8nText>
 			<N8nText v-n8n-html="waitingMessage"></N8nText>
 		</template>
 
