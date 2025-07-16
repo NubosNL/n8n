@@ -12,7 +12,7 @@ import { convertToDisplayDate } from '@/utils/formatters/dateFormatter';
 import { N8nText, N8nTooltip, N8nIcon } from '@n8n/design-system';
 import { computed, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
-import { orderBy } from 'lodash-es';
+import orderBy from 'lodash/orderBy';
 import { statusDictionary } from '@/components/Evaluations.ee/shared/statusDictionary';
 import { getErrorBaseKey } from '@/components/Evaluations.ee/shared/errorCodes';
 
@@ -126,7 +126,7 @@ onMounted(async () => {
 	<div :class="$style.container" data-test-id="test-definition-run-detail">
 		<div :class="$style.header">
 			<button :class="$style.backButton" @click="router.back()">
-				<font-awesome-icon icon="arrow-left" />
+				<N8nIcon icon="arrow-left" />
 				<n8n-heading size="large" :bold="true">{{
 					locale.baseText('evaluation.listRuns.runListHeader', {
 						interpolate: {
@@ -146,12 +146,7 @@ onMounted(async () => {
 				}}
 			</n8n-heading>
 		</div>
-		<n8n-callout
-			v-if="run?.status === 'error'"
-			theme="danger"
-			icon="exclamation-triangle"
-			class="mb-s"
-		>
+		<n8n-callout v-if="run?.status === 'error'" theme="danger" icon="triangle-alert" class="mb-s">
 			<N8nText size="small" :class="$style.capitalized">
 				{{
 					locale.baseText(

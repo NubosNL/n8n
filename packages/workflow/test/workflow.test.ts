@@ -1,6 +1,8 @@
-import { mock } from 'jest-mock-extended';
+/* eslint-disable import/order */
+import { mock } from 'vitest-mock-extended';
 
-import { NodeConnectionTypes } from '@/interfaces';
+import { UserError } from '../src/errors';
+import { NodeConnectionTypes } from '../src/interfaces';
 import type {
 	IBinaryKeyData,
 	IConnection,
@@ -11,16 +13,18 @@ import type {
 	INodeParameters,
 	IRunExecutionData,
 	NodeParameterValueType,
-} from '@/interfaces';
-import { Workflow } from '@/workflow';
+} from '../src/interfaces';
+import { Workflow } from '../src/workflow';
 
 process.env.TEST_VARIABLE_1 = 'valueEnvVariable1';
 
+// eslint-disable-next-line import/order
 import * as Helpers from './helpers';
 
 interface StubNode {
 	name: string;
 	parameters: INodeParameters;
+	type?: string;
 }
 
 describe('Workflow', () => {
@@ -345,7 +349,7 @@ describe('Workflow', () => {
 	});
 
 	beforeEach(() => {
-		jest.restoreAllMocks();
+		vi.restoreAllMocks();
 	});
 
 	describe('renameNodeInParameterValue', () => {
@@ -987,6 +991,109 @@ describe('Workflow', () => {
 					},
 				},
 			},
+			{
+				description: 'rename node with jsCode parameter',
+				input: {
+					currentName: 'Node1',
+					newName: 'Node1New',
+					nodes: [
+						{
+							name: 'Node1',
+							type: 'n8n-nodes-base.code',
+							parameters: {
+								jsCode: '$("Node1").params',
+							},
+						},
+					],
+					connections: {},
+				},
+				output: {
+					nodes: [
+						{
+							name: 'Node1New',
+							type: 'n8n-nodes-base.code',
+							parameters: {
+								jsCode: '$("Node1New").params',
+							},
+						},
+					],
+					connections: {},
+				},
+			},
+			{
+				description: 'rename node with html parameter',
+				input: {
+					currentName: 'Node1',
+					newName: 'Node1New',
+					nodes: [
+						{
+							name: 'Node1',
+							type: 'n8n-nodes-base.html',
+							parameters: {
+								html: '$("Node1").params',
+							},
+						},
+					],
+					connections: {},
+				},
+				output: {
+					nodes: [
+						{
+							name: 'Node1New',
+							type: 'n8n-nodes-base.html',
+							parameters: {
+								html: '$("Node1New").params',
+							},
+						},
+					],
+					connections: {},
+				},
+			},
+			{
+				description: 'rename form node with html parameter',
+				input: {
+					currentName: 'Node1',
+					newName: 'Node1New',
+					nodes: [
+						{
+							name: 'Node1',
+							type: 'n8n-nodes-base.form',
+							parameters: {
+								formFields: {
+									values: [
+										{
+											fieldType: 'html',
+											html: '$("Node1").params',
+											elementName: '$("Node1").params',
+										},
+									],
+								},
+							},
+						},
+					],
+					connections: {},
+				},
+				output: {
+					nodes: [
+						{
+							name: 'Node1New',
+							type: 'n8n-nodes-base.form',
+							parameters: {
+								formFields: {
+									values: [
+										{
+											fieldType: 'html',
+											html: '$("Node1New").params',
+											elementName: '$("Node1").params',
+										},
+									],
+								},
+							},
+						},
+					],
+					connections: {},
+				},
+			},
 			// This does just a basic test if "renameNodeInParameterValue" gets used. More complex
 			// tests with different formats and levels are in the separate tests for the function
 			// "renameNodeInParameterValue"
@@ -1041,7 +1148,7 @@ describe('Workflow', () => {
 			return {
 				name: stubData.name,
 				parameters: stubData.parameters,
-				type: 'test.set',
+				type: stubData.type ?? 'test.set',
 				typeVersion: 1,
 				id: 'uuid-1234',
 				position: [100, 100],
@@ -1077,6 +1184,129 @@ describe('Workflow', () => {
 				expect(workflow.connectionsBySourceNode).toEqual(testData.output.connections);
 			});
 		}
+
+		describe('with restricted node names', () => {
+			const restrictedNames = [
+				'hasOwnProperty',
+				'isPrototypeOf',
+				'propertyIsEnumerable',
+				'toLocaleString',
+				'toString',
+				'valueOf',
+				'constructor',
+				'prototype',
+				'__proto__',
+				'__defineGetter__',
+				'__defineSetter__',
+				'__lookupGetter__',
+				'__lookupSetter__',
+			];
+
+			test.each(restrictedNames)(
+				'should throw error when renaming node to %s',
+				(restrictedName) => {
+					const workflow = new Workflow({
+						nodes: [
+							{
+								name: 'Node1',
+								parameters: {},
+								type: 'test.set',
+								typeVersion: 1,
+								id: 'uuid-1',
+								position: [100, 100],
+							},
+						],
+						connections: {},
+						active: false,
+						nodeTypes,
+					});
+
+					expect(() => workflow.renameNode('Node1', restrictedName)).toThrow(
+						`Node name "${restrictedName}" is a restricted name.`,
+					);
+				},
+			);
+
+			test.each(restrictedNames)(
+				'should throw error when renaming node to %s with different case',
+				(restrictedName) => {
+					const workflow = new Workflow({
+						nodes: [
+							{
+								name: 'Node1',
+								parameters: {},
+								type: 'test.set',
+								typeVersion: 1,
+								id: 'uuid-1',
+								position: [100, 100],
+							},
+						],
+						connections: {},
+						active: false,
+						nodeTypes,
+					});
+
+					const upperCaseName = restrictedName.toUpperCase();
+					expect(() => workflow.renameNode('Node1', upperCaseName)).toThrow(
+						`Node name "${upperCaseName}" is a restricted name.`,
+					);
+				},
+			);
+
+			test('should throw error with proper description', () => {
+				const workflow = new Workflow({
+					nodes: [
+						{
+							name: 'Node1',
+							parameters: {},
+							type: 'test.set',
+							typeVersion: 1,
+							id: 'uuid-1',
+							position: [100, 100],
+						},
+					],
+					connections: {},
+					active: false,
+					nodeTypes,
+				});
+
+				try {
+					workflow.renameNode('Node1', 'toString');
+				} catch (error) {
+					if (!(error instanceof UserError)) {
+						throw new Error('Expected error to be an instance of UserError');
+					}
+					expect(error).toBeInstanceOf(UserError);
+					expect(error.message).toBe('Node name "toString" is a restricted name.');
+					expect(error.description).toBe(
+						'Node names cannot be any of the following: hasOwnProperty, isPrototypeOf, propertyIsEnumerable, toLocaleString, toString, valueOf, constructor, prototype, __proto__, __defineGetter__, __defineSetter__, __lookupGetter__, __lookupSetter__',
+					);
+				}
+			});
+
+			test('should allow renaming to names that contain restricted names as substring', () => {
+				const workflow = new Workflow({
+					nodes: [
+						{
+							name: 'Node1',
+							parameters: {},
+							type: 'test.set',
+							typeVersion: 1,
+							id: 'uuid-1',
+							position: [100, 100],
+						},
+					],
+					connections: {},
+					active: false,
+					nodeTypes,
+				});
+
+				// These should not throw as they're not exact matches
+				expect(() => workflow.renameNode('Node1', 'myToString')).not.toThrow();
+				expect(() => workflow.renameNode('Node1', 'toStringNode')).not.toThrow();
+				expect(() => workflow.renameNode('Node1', 'hasOwnPropertyChecker')).not.toThrow();
+			});
+		});
 	});
 
 	describe('getParameterValue', () => {
@@ -2356,6 +2586,25 @@ describe('Workflow', () => {
 
 			expect(workflow.getStartNode()).toBeUndefined();
 		});
+
+		test('returns the single node when only one non-disabled node exists', () => {
+			const singleNode = {
+				name: 'SingleNode',
+				type: 'test.set',
+				typeVersion: 1,
+				id: 'uuid-single',
+				position: [0, 0],
+				parameters: {},
+			} as INode;
+			const workflow = new Workflow({
+				nodes: [singleNode],
+				connections: {},
+				active: false,
+				nodeTypes,
+			});
+
+			expect(workflow.getStartNode()).toBe(singleNode);
+		});
 	});
 
 	describe('getNode', () => {
@@ -2393,7 +2642,7 @@ describe('Workflow', () => {
 
 		test('should skip nodes that do not exist and log a warning', () => {
 			// Spy on console.warn
-			const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+			const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 			const nodes = SIMPLE_WORKFLOW.getNodes(['Start', 'NonExistentNode', 'Set1']);
 			expect(nodes).toHaveLength(2);
@@ -2406,7 +2655,7 @@ describe('Workflow', () => {
 
 		test('should return an empty array if none of the requested nodes exist', () => {
 			// Spy on console.warn
-			const consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation();
+			const consoleWarnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
 			const nodes = SIMPLE_WORKFLOW.getNodes(['NonExistentNode1', 'NonExistentNode2']);
 			expect(nodes).toHaveLength(0);
@@ -2416,6 +2665,229 @@ describe('Workflow', () => {
 		test('should handle an empty array of node names', () => {
 			const nodes = SIMPLE_WORKFLOW.getNodes([]);
 			expect(nodes).toHaveLength(0);
+		});
+	});
+	describe('getConnectionsBetweenNodes', () => {
+		test('should return empty array if no connections exist between sources and targets', () => {
+			const result = SIMPLE_WORKFLOW.getConnectionsBetweenNodes(['Start'], ['Set1']);
+			expect(result).toEqual([]);
+		});
+
+		test('should return connections between a single source and target', () => {
+			const result = SIMPLE_WORKFLOW.getConnectionsBetweenNodes(['Start'], ['Set']);
+			expect(result).toEqual([
+				[
+					{ node: 'Start', index: 0, type: NodeConnectionTypes.Main },
+					{ node: 'Set', type: NodeConnectionTypes.Main, index: 0 },
+				],
+			]);
+		});
+
+		test('should return connections between multiple sources and a single target', () => {
+			const connections: IConnections = {
+				Node1: {
+					main: [[{ node: 'TargetNode', type: NodeConnectionTypes.Main, index: 0 }]],
+				},
+				Node2: {
+					main: [[{ node: 'TargetNode', type: NodeConnectionTypes.Main, index: 0 }]],
+				},
+			};
+
+			const workflow = new Workflow({
+				id: 'test',
+				nodes: [
+					{
+						id: 'Node1',
+						name: 'Node1',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+					{
+						id: 'Node2',
+						name: 'Node2',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+					{
+						id: 'TargetNode',
+						name: 'TargetNode',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+				],
+				connections,
+				active: false,
+				nodeTypes,
+			});
+
+			const result = workflow.getConnectionsBetweenNodes(['Node1', 'Node2'], ['TargetNode']);
+			expect(result).toEqual([
+				[
+					{ node: 'Node1', index: 0, type: NodeConnectionTypes.Main },
+					{ node: 'TargetNode', type: NodeConnectionTypes.Main, index: 0 },
+				],
+				[
+					{ node: 'Node2', index: 0, type: NodeConnectionTypes.Main },
+					{ node: 'TargetNode', type: NodeConnectionTypes.Main, index: 0 },
+				],
+			]);
+		});
+
+		test('should return connections between a single source and multiple targets', () => {
+			const connections: IConnections = {
+				Node1: {
+					main: [
+						[
+							{ node: 'TargetNode1', type: NodeConnectionTypes.Main, index: 0 },
+							{ node: 'TargetNode2', type: NodeConnectionTypes.Main, index: 0 },
+						],
+					],
+				},
+			};
+
+			const workflow = new Workflow({
+				id: 'test',
+				nodes: [
+					{
+						id: 'Node1',
+						name: 'Node1',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+					{
+						id: 'TargetNode1',
+						name: 'TargetNode1',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+					{
+						id: 'TargetNode2',
+						name: 'TargetNode2',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+				],
+				connections,
+				active: false,
+				nodeTypes,
+			});
+
+			const result = workflow.getConnectionsBetweenNodes(['Node1'], ['TargetNode1', 'TargetNode2']);
+			expect(result).toEqual([
+				[
+					{ node: 'Node1', index: 0, type: NodeConnectionTypes.Main },
+					{ node: 'TargetNode1', type: NodeConnectionTypes.Main, index: 0 },
+				],
+				[
+					{ node: 'Node1', index: 0, type: NodeConnectionTypes.Main },
+					{ node: 'TargetNode2', type: NodeConnectionTypes.Main, index: 0 },
+				],
+			]);
+		});
+
+		test('should handle workflows with multiple connection types', () => {
+			const connections: IConnections = {
+				Node1: {
+					main: [
+						[
+							{ node: 'TargetNode', type: NodeConnectionTypes.Main, index: 0 },
+							{ node: 'TargetNode', type: NodeConnectionTypes.Main, index: 1 },
+						],
+					],
+					[NodeConnectionTypes.AiAgent]: [
+						[{ node: 'TargetNode', type: NodeConnectionTypes.AiAgent, index: 0 }],
+					],
+				},
+			};
+
+			const workflow = new Workflow({
+				id: 'test',
+				nodes: [
+					{
+						id: 'Node1',
+						name: 'Node1',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+					{
+						id: 'TargetNode',
+						name: 'TargetNode',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+				],
+				connections,
+				active: false,
+				nodeTypes,
+			});
+
+			const result = workflow.getConnectionsBetweenNodes(['Node1'], ['TargetNode']);
+			expect(result).toEqual([
+				[
+					{ node: 'Node1', index: 0, type: NodeConnectionTypes.Main },
+					{ node: 'TargetNode', type: NodeConnectionTypes.Main, index: 0 },
+				],
+				[
+					{ node: 'Node1', index: 0, type: NodeConnectionTypes.Main },
+					{ node: 'TargetNode', type: NodeConnectionTypes.Main, index: 1 },
+				],
+				[
+					{ node: 'Node1', index: 0, type: NodeConnectionTypes.AiAgent },
+					{ node: 'TargetNode', type: NodeConnectionTypes.AiAgent, index: 0 },
+				],
+			]);
+		});
+
+		test('should handle nodes with no connections', () => {
+			const connections: IConnections = {
+				Node1: {
+					main: [[]],
+				},
+			};
+
+			const workflow = new Workflow({
+				id: 'test',
+				nodes: [
+					{
+						id: 'Node1',
+						name: 'Node1',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+					{
+						id: 'TargetNode',
+						name: 'TargetNode',
+						type: 'test.set',
+						typeVersion: 1,
+						position: [0, 0],
+						parameters: {},
+					},
+				],
+				connections,
+				active: false,
+				nodeTypes,
+			});
+
+			const result = workflow.getConnectionsBetweenNodes(['Node1'], ['TargetNode']);
+			expect(result).toEqual([]);
 		});
 	});
 });

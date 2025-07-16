@@ -1,7 +1,7 @@
 import { Logger } from '@n8n/backend-common';
 import { Memoized } from '@n8n/decorators';
 import { Container } from '@n8n/di';
-import { get } from 'lodash';
+import get from 'lodash/get';
 import type {
 	FunctionsBase,
 	ICredentialDataDecryptedObject,
@@ -17,6 +17,7 @@ import type {
 	IRunExecutionData,
 	IWorkflowExecuteAdditionalData,
 	NodeConnectionType,
+	NodeInputConnections,
 	NodeParameterValueType,
 	NodeTypeAndVersion,
 	Workflow,
@@ -151,6 +152,10 @@ export abstract class NodeExecutionContext implements Omit<FunctionsBase, 'getCr
 			.map((nodeName) => this.workflow.getNode(nodeName))
 			.filter((node) => !!node)
 			.filter((node) => node.disabled !== true);
+	}
+
+	getConnections(destination: INode, connectionType: NodeConnectionType): NodeInputConnections {
+		return this.workflow.connectionsByDestinationNode[destination.name]?.[connectionType] ?? [];
 	}
 
 	getNodeOutputs(): INodeOutputConfiguration[] {

@@ -1,4 +1,3 @@
-/* eslint-disable n8n-nodes-base/node-dirname-against-convention */
 import { OpenAIEmbeddings } from '@langchain/openai';
 import {
 	NodeConnectionTypes,
@@ -11,6 +10,8 @@ import {
 import type { ClientOptions } from 'openai';
 
 import { logWrapper } from '@utils/logWrapper';
+
+import { getProxyAgent } from '@utils/httpProxyAgent';
 import { getConnectionHintNoticeField } from '@utils/sharedFields';
 
 const modelParameter: INodeProperties = {
@@ -98,9 +99,9 @@ export class EmbeddingsOpenAi implements INodeType {
 				],
 			},
 		},
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-inputs-wrong-regular-node
+
 		inputs: [],
-		// eslint-disable-next-line n8n-nodes-base/node-class-description-outputs-wrong
+
 		outputs: [NodeConnectionTypes.AiEmbedding],
 		outputNames: ['Embeddings'],
 		requestDefaults: {
@@ -226,6 +227,12 @@ export class EmbeddingsOpenAi implements INodeType {
 			configuration.baseURL = options.baseURL;
 		} else if (credentials.url) {
 			configuration.baseURL = credentials.url as string;
+		}
+
+		if (configuration.baseURL) {
+			configuration.fetchOptions = {
+				dispatcher: getProxyAgent(configuration.baseURL ?? 'https://api.openai.com/v1'),
+			};
 		}
 
 		const embeddings = new OpenAIEmbeddings({
