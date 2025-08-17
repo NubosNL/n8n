@@ -5,8 +5,8 @@ import { useWorkflowsStore } from '@/stores/workflows.store';
 import { getActivatableTriggerNodes } from '@/utils/nodeTypesUtils';
 import type { VNode } from 'vue';
 import { computed, h, watch } from 'vue';
-import { useI18n } from '@/composables/useI18n';
-import type { PermissionsRecord } from '@/permissions';
+import { useI18n } from '@n8n/i18n';
+import type { PermissionsRecord } from '@n8n/permissions';
 import {
 	WORKFLOW_ACTIVATION_CONFLICTING_WEBHOOK_MODAL_KEY,
 	EXECUTE_WORKFLOW_TRIGGER_NODE_TYPE,
@@ -19,9 +19,9 @@ import { OPEN_AI_API_CREDENTIAL_TYPE } from 'n8n-workflow';
 import { useUIStore } from '@/stores/ui.store';
 
 import { useWorkflowHelpers } from '@/composables/useWorkflowHelpers';
-import { useRouter } from 'vue-router';
 
 const props = defineProps<{
+	isArchived: boolean;
 	workflowActive: boolean;
 	workflowId: string;
 	workflowPermissions: PermissionsRecord['workflow'];
@@ -36,8 +36,7 @@ const workflowActivate = useWorkflowActivate();
 
 const uiStore = useUIStore();
 
-const router = useRouter();
-const workflowHelpers = useWorkflowHelpers({ router });
+const workflowHelpers = useWorkflowHelpers();
 
 const i18n = useI18n();
 const workflowsStore = useWorkflowsStore();
@@ -87,6 +86,10 @@ const isNewWorkflow = computed(
 );
 
 const disabled = computed((): boolean => {
+	if (props.isArchived) {
+		return true;
+	}
+
 	if (isNewWorkflow.value || isCurrentWorkflow.value) {
 		return !props.workflowActive && !containsTrigger.value;
 	}
@@ -140,7 +143,7 @@ async function activeChanged(newActiveState: boolean) {
 			uiStore.openModalWithData({
 				name: WORKFLOW_ACTIVATION_CONFLICTING_WEBHOOK_MODAL_KEY,
 				data: {
-					triggerName: trigger.name,
+					triggerType: trigger.type,
 					workflowName: conflictingWorkflow.name,
 					...conflict,
 				},
@@ -221,9 +224,11 @@ watch(
 				<div>
 					{{
 						i18n.baseText(
-							containsOnlyExecuteWorkflowTrigger
-								? 'workflowActivator.thisWorkflowHasOnlyOneExecuteWorkflowTriggerNode'
-								: 'workflowActivator.thisWorkflowHasNoTriggerNodes',
+							isArchived
+								? 'workflowActivator.thisWorkflowIsArchived'
+								: containsOnlyExecuteWorkflowTrigger
+									? 'workflowActivator.thisWorkflowHasOnlyOneExecuteWorkflowTriggerNode'
+									: 'workflowActivator.thisWorkflowHasNoTriggerNodes',
 						)
 					}}
 				</div>
@@ -257,7 +262,7 @@ watch(
 						@click="displayActivationError"
 					></div>
 				</template>
-				<font-awesome-icon icon="exclamation-triangle" @click="displayActivationError" />
+				<n8n-icon icon="triangle-alert" @click="displayActivationError" />
 			</n8n-tooltip>
 		</div>
 	</div>
@@ -265,7 +270,6 @@ watch(
 
 <style lang="scss" module>
 .activeStatusText {
-	width: 64px; // Required to avoid jumping when changing active state
 	padding-right: var(--spacing-2xs);
 	box-sizing: border-box;
 	display: inline-block;

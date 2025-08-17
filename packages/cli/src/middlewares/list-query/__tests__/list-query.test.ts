@@ -1,3 +1,4 @@
+import type { ListQueryDb } from '@n8n/db';
 import type { Response, NextFunction } from 'express';
 
 import { filterListQueryMiddleware } from '@/middlewares/list-query/filter';
@@ -5,14 +6,13 @@ import { paginationListQueryMiddleware } from '@/middlewares/list-query/paginati
 import { selectListQueryMiddleware } from '@/middlewares/list-query/select';
 import type { ListQuery } from '@/requests';
 import * as ResponseHelper from '@/response-helper';
-import type { ListQueryDb } from '@/types-db';
 
 import { sortByQueryMiddleware } from '../sort-by';
 
 describe('List query middleware', () => {
 	let mockReq: ListQuery.Request;
 	let mockRes: Response;
-	let nextFn: NextFunction = jest.fn();
+	const nextFn: NextFunction = jest.fn();
 	let args: [ListQuery.Request, Response, NextFunction];
 
 	let sendErrorResponse: jest.SpyInstance;

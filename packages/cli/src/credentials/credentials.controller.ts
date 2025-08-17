@@ -4,7 +4,14 @@ import {
 	CredentialsGetOneRequestQuery,
 	GenerateCredentialNameRequestQuery,
 } from '@n8n/api-types';
+import { Logger } from '@n8n/backend-common';
 import { GlobalConfig } from '@n8n/config';
+import {
+	SharedCredentials,
+	ProjectRelationRepository,
+	SharedCredentialsRepository,
+	AuthenticatedRequest,
+} from '@n8n/db';
 import {
 	Delete,
 	Get,
@@ -20,22 +27,17 @@ import {
 } from '@n8n/decorators';
 // eslint-disable-next-line n8n-local-rules/misplaced-n8n-typeorm-import
 import { In } from '@n8n/typeorm';
-import { Logger } from 'n8n-core';
 import { deepCopy } from 'n8n-workflow';
 import type { ICredentialDataDecryptedObject } from 'n8n-workflow';
 import { z } from 'zod';
 
-import { SharedCredentials } from '@/databases/entities/shared-credentials';
-import { ProjectRelationRepository } from '@/databases/repositories/project-relation.repository';
-import { SharedCredentialsRepository } from '@/databases/repositories/shared-credentials.repository';
-import * as Db from '@/db';
 import { BadRequestError } from '@/errors/response-errors/bad-request.error';
 import { ForbiddenError } from '@/errors/response-errors/forbidden.error';
 import { NotFoundError } from '@/errors/response-errors/not-found.error';
 import { EventService } from '@/events/event.service';
 import { License } from '@/license';
 import { listQueryMiddleware } from '@/middlewares';
-import { AuthenticatedRequest, CredentialRequest } from '@/requests';
+import { CredentialRequest } from '@/requests';
 import { NamingService } from '@/services/naming.service';
 import { UserManagementMailer } from '@/user-management/email';
 import * as utils from '@/utils';
@@ -70,6 +72,7 @@ export class CredentialsController {
 			listQueryOptions: req.listQueryOptions,
 			includeScopes: query.includeScopes,
 			includeData: query.includeData,
+			onlySharedWithMe: query.onlySharedWithMe,
 		});
 		credentials.forEach((c) => {
 			// @ts-expect-error: This is to emulate the old behavior of removing the shared
@@ -318,7 +321,8 @@ export class CredentialsController {
 		let amountRemoved: number | null = null;
 		let newShareeIds: string[] = [];
 
-		await Db.transaction(async (trx) => {
+		const { manager: dbManager } = this.sharedCredentialsRepository;
+		await dbManager.transaction(async (trx) => {
 			const currentProjectIds = credential.shared
 				.filter((sc) => sc.role === 'credential:user')
 				.map((sc) => sc.projectId);

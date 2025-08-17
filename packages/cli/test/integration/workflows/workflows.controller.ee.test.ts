@@ -1,19 +1,30 @@
-import type { ProjectRole } from '@n8n/api-types';
+import {
+	createTeamProject,
+	getPersonalProject,
+	linkUserToProject,
+	createWorkflow,
+	getWorkflowSharing,
+	shareWorkflowWithProjects,
+	shareWorkflowWithUsers,
+	randomCredentialPayload,
+	testDb,
+	mockInstance,
+} from '@n8n/backend-test-utils';
+import type { Project, User, WorkflowWithSharingsMetaDataAndCredentials } from '@n8n/db';
+import {
+	ProjectRepository,
+	WorkflowHistoryRepository,
+	SharedWorkflowRepository,
+	WorkflowRepository,
+} from '@n8n/db';
 import { Container } from '@n8n/di';
+import type { ProjectRole } from '@n8n/permissions';
 import { ApplicationError, WorkflowActivationError, type INode } from 'n8n-workflow';
 import { v4 as uuid } from 'uuid';
 
 import { ActiveWorkflowManager } from '@/active-workflow-manager';
 import config from '@/config';
-import type { Project } from '@/databases/entities/project';
-import type { User } from '@/databases/entities/user';
-import { ProjectRepository } from '@/databases/repositories/project.repository';
-import { SharedWorkflowRepository } from '@/databases/repositories/shared-workflow.repository';
-import { WorkflowHistoryRepository } from '@/databases/repositories/workflow-history.repository';
-import { WorkflowRepository } from '@/databases/repositories/workflow.repository';
-import type { WorkflowWithSharingsMetaDataAndCredentials } from '@/types-db';
 import { UserManagementMailer } from '@/user-management/email';
-import { mockInstance } from '@test/mocking';
 import { createFolder } from '@test-integration/db/folders';
 
 import {
@@ -22,19 +33,9 @@ import {
 	shareCredentialWithProjects,
 	shareCredentialWithUsers,
 } from '../shared/db/credentials';
-import { createTeamProject, getPersonalProject, linkUserToProject } from '../shared/db/projects';
 import { createTag } from '../shared/db/tags';
 import { createAdmin, createOwner, createUser, createUserShell } from '../shared/db/users';
-import {
-	createWorkflow,
-	getWorkflowSharing,
-	shareWorkflowWithProjects,
-	shareWorkflowWithUsers,
-} from '../shared/db/workflows';
-import { randomCredentialPayload } from '../shared/random';
-import * as testDb from '../shared/test-db';
-import type { SaveCredentialFunction } from '../shared/types';
-import type { SuperAgentTest } from '../shared/types';
+import type { SaveCredentialFunction, SuperAgentTest } from '../shared/types';
 import * as utils from '../shared/utils/';
 import { makeWorkflow } from '../shared/utils/';
 
@@ -89,7 +90,7 @@ beforeEach(async () => {
 	activeWorkflowManager.add.mockReset();
 	activeWorkflowManager.remove.mockReset();
 
-	await testDb.truncate(['Workflow', 'SharedWorkflow', 'WorkflowHistory', 'Tag']);
+	await testDb.truncate(['WorkflowEntity', 'SharedWorkflow', 'WorkflowHistory', 'TagEntity']);
 });
 
 afterEach(() => {

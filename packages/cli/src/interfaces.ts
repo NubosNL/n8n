@@ -1,5 +1,6 @@
-import type { AssignableRole } from '@n8n/permissions';
-import type { Application } from 'express';
+import type { ICredentialsBase, IExecutionBase, IExecutionDb, ITagBase } from '@n8n/db';
+import type { AssignableGlobalRole } from '@n8n/permissions';
+import type { Application, Response } from 'express';
 import type {
 	ExecutionError,
 	ICredentialDataDecryptedObject,
@@ -19,7 +20,6 @@ import type PCancelable from 'p-cancelable';
 
 import type { ActiveWorkflowManager } from '@/active-workflow-manager';
 import type { ExternalHooks } from '@/external-hooks';
-import type { ICredentialsBase, IExecutionBase, IExecutionDb, ITagBase } from '@/types-db';
 
 export interface ICredentialsTypeData {
 	[key: string]: CredentialLoadingDetails;
@@ -48,10 +48,16 @@ export interface IWorkflowResponse extends IWorkflowBase {
 
 export interface IWorkflowToImport
 	extends Omit<IWorkflowBase, 'staticData' | 'pinData' | 'createdAt' | 'updatedAt'> {
-	owner: {
-		type: 'personal';
-		personalEmail: string;
-	};
+	owner?:
+		| {
+				type: 'personal';
+				personalEmail: string;
+		  }
+		| {
+				type: 'team';
+				teamId: string;
+				teamName: string;
+		  };
 	parentFolderId: string | null;
 }
 
@@ -108,6 +114,8 @@ export interface IExecutingWorkflowData {
 	startedAt: Date;
 	/** This promise rejects when the execution is stopped. When the execution finishes (successfully or not), the promise resolves. */
 	postExecutePromise: IDeferredPromise<IRun | undefined>;
+	/** HTTPResponse needed for streaming responses */
+	httpResponse?: Response;
 	responsePromise?: IDeferredPromise<IExecuteResponsePromiseData>;
 	workflowExecution?: PCancelable<IRun>;
 	status: ExecutionStatus;
@@ -146,33 +154,6 @@ export interface IWorkflowStatisticsDataLoaded {
 }
 
 // ----------------------------------
-//          community nodes
-// ----------------------------------
-
-export namespace CommunityPackages {
-	export type ParsedPackageName = {
-		packageName: string;
-		rawString: string;
-		scope?: string;
-		version?: string;
-	};
-
-	export type AvailableUpdates = {
-		[packageName: string]: {
-			current: string;
-			wanted: string;
-			latest: string;
-			location: string;
-		};
-	};
-
-	export type PackageStatusCheck = {
-		status: 'OK' | 'Banned';
-		reason?: string;
-	};
-}
-
-// ----------------------------------
 //               telemetry
 // ----------------------------------
 
@@ -194,6 +175,10 @@ export interface ILicenseReadResponse {
 			value: number;
 			warningThreshold: number;
 		};
+		workflowsHavingEvaluations: {
+			limit: number;
+			value: number;
+		};
 	};
 	license: {
 		planId: string;
@@ -207,7 +192,7 @@ export interface ILicensePostResponse extends ILicenseReadResponse {
 
 export interface Invitation {
 	email: string;
-	role: AssignableRole;
+	role: AssignableGlobalRole;
 }
 
 export interface N8nApp {

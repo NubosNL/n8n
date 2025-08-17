@@ -1,8 +1,12 @@
+import { mockInstance } from '@n8n/backend-test-utils';
 import { GlobalConfig } from '@n8n/config';
+import type { WorkflowEntity } from '@n8n/db';
+import { ExecutionRepository, WorkflowRepository } from '@n8n/db';
 import { Container } from '@n8n/di';
 import { mock } from 'jest-mock-extended';
-import type { IWorkflowBase } from 'n8n-workflow';
+import { ExternalSecretsProxy } from 'n8n-core';
 import type {
+	IWorkflowBase,
 	IExecuteWorkflowInfo,
 	IWorkflowExecuteAdditionalData,
 	ExecuteWorkflowOptions,
@@ -13,9 +17,6 @@ import type PCancelable from 'p-cancelable';
 
 import { ActiveExecutions } from '@/active-executions';
 import { CredentialsHelper } from '@/credentials-helper';
-import type { WorkflowEntity } from '@/databases/entities/workflow-entity';
-import { ExecutionRepository } from '@/databases/repositories/execution.repository';
-import { WorkflowRepository } from '@/databases/repositories/workflow.repository';
 import { VariablesService } from '@/environments.ee/variables/variables.service.ee';
 import { EventService } from '@/events/event.service';
 import {
@@ -23,13 +24,11 @@ import {
 	SubworkflowPolicyChecker,
 } from '@/executions/pre-execution-checks';
 import { ExternalHooks } from '@/external-hooks';
-import { SecretsHelper } from '@/secrets-helpers.ee';
 import { UrlService } from '@/services/url.service';
 import { WorkflowStatisticsService } from '@/services/workflow-statistics.service';
 import { Telemetry } from '@/telemetry';
 import { executeWorkflow, getBase, getRunData } from '@/workflow-execute-additional-data';
 import * as WorkflowHelpers from '@/workflow-helpers';
-import { mockInstance } from '@test/mocking';
 
 const EXECUTION_ID = '123';
 const LAST_NODE_EXECUTED = 'Last node executed';
@@ -86,12 +85,12 @@ describe('WorkflowExecuteAdditionalData', () => {
 	const variablesService = mockInstance(VariablesService);
 	variablesService.getAllCached.mockResolvedValue([]);
 	const credentialsHelper = mockInstance(CredentialsHelper);
-	const secretsHelper = mockInstance(SecretsHelper);
+	const externalSecretsProxy = mockInstance(ExternalSecretsProxy);
 	const eventService = mockInstance(EventService);
 	mockInstance(ExternalHooks);
 	Container.set(VariablesService, variablesService);
 	Container.set(CredentialsHelper, credentialsHelper);
-	Container.set(SecretsHelper, secretsHelper);
+	Container.set(ExternalSecretsProxy, externalSecretsProxy);
 	const executionRepository = mockInstance(ExecutionRepository);
 	mockInstance(Telemetry);
 	const workflowRepository = mockInstance(WorkflowRepository);
@@ -306,7 +305,7 @@ describe('WorkflowExecuteAdditionalData', () => {
 				userId: undefined,
 				setExecutionStatus: expect.any(Function),
 				variables: mockVariables,
-				secretsHelpers: secretsHelper,
+				externalSecretsProxy,
 				startRunnerTask: expect.any(Function),
 				logAiEvent: expect.any(Function),
 			});
