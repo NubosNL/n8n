@@ -13,7 +13,7 @@ import { smartDecimal } from '@n8n/utils/number/smartDecimal';
 import { useTelemetry } from '@/composables/useTelemetry';
 import { VIEWS } from '@/constants';
 import { computed, defineAsyncComponent, ref, watch } from 'vue';
-import { type RouteLocationRaw, type LocationQueryRaw } from 'vue-router';
+import { type RouteLocationRaw, type LocationQueryRaw, RouterLink } from 'vue-router';
 
 const InsightsPaywall = defineAsyncComponent(
 	async () => await import('@/features/insights/components/InsightsPaywall.vue'),
@@ -168,26 +168,33 @@ watch(sortBy, (newValue) => {
 			@update:options="emit('update:options', $event)"
 		>
 			<template #[`item.workflowName`]="{ item }">
-				<router-link
-					:to="getWorkflowLink(item)"
-					:class="$style.link"
-					@click="trackWorkflowClick(item)"
+				<component
+					:is="item.workflowId ? RouterLink : 'div'"
+					v-bind="
+						item.workflowId
+							? {
+									to: getWorkflowLink(item),
+									class: $style.link,
+									onClick: () => trackWorkflowClick(item),
+								}
+							: {}
+					"
 				>
 					<N8nTooltip :content="item.workflowName" placement="top">
 						<div :class="$style.ellipsis">
 							{{ item.workflowName }}
 						</div>
 					</N8nTooltip>
-				</router-link>
+				</component>
 			</template>
 			<template #[`item.timeSaved`]="{ item, value }">
-				<router-link
-					v-if="!item.timeSaved"
+				<RouterLink
+					v-if="!item.timeSaved && item.workflowId"
 					:to="getWorkflowLink(item, { settings: 'true' })"
 					:class="$style.link"
 				>
 					{{ i18n.baseText('insights.dashboard.table.estimate') }}
-				</router-link>
+				</RouterLink>
 				<template v-else>
 					{{ value }}
 				</template>

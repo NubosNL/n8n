@@ -25,6 +25,7 @@ import { useAssistantStore } from '@/stores/assistant.store';
 type Props = {
 	nodeViewScale: number;
 	createNodeActive?: boolean;
+	focusPanelActive: boolean;
 };
 
 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
@@ -84,10 +85,13 @@ function nodeTypeSelected(value: NodeTypeSelectedPayload[]) {
 function toggleFocusPanel() {
 	focusPanelStore.toggleFocusPanel();
 
-	telemetry.track(`User ${focusPanelStore.focusPanelActive ? 'opened' : 'closed'} focus panel`, {
-		source: 'canvasButton',
-		parameters: focusPanelStore.focusedNodeParametersInTelemetryFormat,
-	});
+	telemetry.track(
+		focusPanelStore.focusPanelActive ? 'User opened focus panel' : 'User closed focus panel',
+		{
+			source: 'canvasButton',
+			parameters: focusPanelStore.focusedNodeParametersInTelemetryFormat,
+		},
+	);
 }
 
 function onAskAssistantButtonClick() {
@@ -109,7 +113,7 @@ function onAskAssistantButtonClick() {
 			:shortcut="{ keys: ['Tab'] }"
 			placement="left"
 		>
-			<n8n-icon-button
+			<N8nIconButton
 				size="large"
 				icon="plus"
 				type="tertiary"
@@ -122,7 +126,7 @@ function onAskAssistantButtonClick() {
 			:shortcut="{ keys: ['s'], shiftKey: true }"
 			placement="left"
 		>
-			<n8n-icon-button
+			<N8nIconButton
 				size="large"
 				type="tertiary"
 				icon="sticky-note"
@@ -135,11 +139,19 @@ function onAskAssistantButtonClick() {
 			:shortcut="{ keys: ['f'], shiftKey: true }"
 			placement="left"
 		>
-			<n8n-icon-button type="tertiary" size="large" icon="panel-right" @click="toggleFocusPanel" />
+			<N8nIconButton
+				type="tertiary"
+				size="large"
+				icon="panel-right"
+				:class="focusPanelActive ? $style.activeButton : ''"
+				:active="focusPanelActive"
+				data-test-id="toggle-focus-panel-button"
+				@click="toggleFocusPanel"
+			/>
 		</KeyboardShortcutTooltip>
-		<n8n-tooltip v-if="assistantStore.canShowAssistantButtonsOnCanvas" placement="left">
+		<N8nTooltip v-if="assistantStore.canShowAssistantButtonsOnCanvas" placement="left">
 			<template #content> {{ i18n.baseText('aiAssistant.tooltip') }}</template>
-			<n8n-button
+			<N8nButton
 				type="tertiary"
 				size="large"
 				square
@@ -152,8 +164,8 @@ function onAskAssistantButtonClick() {
 						<AssistantIcon size="large" />
 					</div>
 				</template>
-			</n8n-button>
-		</n8n-tooltip>
+			</N8nButton>
+		</N8nTooltip>
 	</div>
 	<Suspense>
 		<LazyNodeCreator
@@ -184,5 +196,9 @@ function onAskAssistantButtonClick() {
 	svg {
 		display: block;
 	}
+}
+
+.activeButton {
+	background-color: var(--button-hover-background-color) !important;
 }
 </style>
