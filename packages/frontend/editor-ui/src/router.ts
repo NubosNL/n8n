@@ -5,68 +5,92 @@ import type {
 	RouteLocationRaw,
 	RouteLocationNormalized,
 } from 'vue-router';
-import { createRouter, createWebHistory, isNavigationFailure } from 'vue-router';
-import { useExternalHooks } from '@/composables/useExternalHooks';
-import { useSettingsStore } from '@/stores/settings.store';
-import { useTemplatesStore } from '@/stores/templates.store';
-import { useUIStore } from '@/stores/ui.store';
-import { useSSOStore } from '@/stores/sso.store';
-import { useTestDefinitionStore } from '@/stores/testDefinition.store.ee';
-import { EnterpriseEditionFeature, VIEWS, EDITABLE_CANVAS_VIEWS } from '@/constants';
-import { useTelemetry } from '@/composables/useTelemetry';
-import { middleware } from '@/utils/rbac/middleware';
-import type { RouterMiddleware } from '@/types/router';
+import { createRouter, createWebHistory, isNavigationFailure, RouterView } from 'vue-router';
+import { useExternalHooks } from '@/app/composables/useExternalHooks';
+import { useSettingsStore } from '@/app/stores/settings.store';
+import { useTemplatesStore } from '@/features/workflows/templates/templates.store';
+import { useUIStore } from '@/app/stores/ui.store';
+import { useSSOStore } from '@/features/settings/sso/sso.store';
+import { EnterpriseEditionFeature, VIEWS, EDITABLE_CANVAS_VIEWS } from '@/app/constants';
+import { useTelemetry } from '@/app/composables/useTelemetry';
+import { middleware } from '@/app/utils/rbac/middleware';
+import type { RouterMiddleware } from '@/app/types/router';
 import { initializeAuthenticatedFeatures, initializeCore } from '@/init';
-import { tryToParseNumber } from '@/utils/typesUtils';
-import { projectsRoutes } from '@/routes/projects.routes';
-import TestDefinitionRunDetailView from './views/TestDefinition/TestDefinitionRunDetailView.vue';
+import { tryToParseNumber } from '@/app/utils/typesUtils';
+import { projectsRoutes } from '@/features/collaboration/projects/projects.routes';
+import { MfaRequiredError } from '@n8n/rest-api-client';
+import { useCalloutHelpers } from '@/app/composables/useCalloutHelpers';
+import { useRecentResources } from '@/features/shared/commandBar/composables/useRecentResources';
+import { useEnvFeatureFlag } from '@/features/shared/envFeatureFlag/useEnvFeatureFlag';
 
-const ChangePasswordView = async () => await import('./views/ChangePasswordView.vue');
-const ErrorView = async () => await import('./views/ErrorView.vue');
-const ForgotMyPasswordView = async () => await import('./views/ForgotMyPasswordView.vue');
-const MainHeader = async () => await import('@/components/MainHeader/MainHeader.vue');
-const MainSidebar = async () => await import('@/components/MainSidebar.vue');
-const CanvasChatSwitch = async () => await import('@/components/CanvasChat/CanvasChatSwitch.vue');
-const NodeView = async () => await import('@/views/NodeView.vue');
-const WorkflowExecutionsView = async () => await import('@/views/WorkflowExecutionsView.vue');
+const ChangePasswordView = async () =>
+	await import('@/features/core/auth/views/ChangePasswordView.vue');
+const ErrorView = async () => await import('@/app/views/ErrorView.vue');
+const EntityNotFound = async () => await import('@/app/views/EntityNotFound.vue');
+const EntityUnAuthorised = async () => await import('@/app/views/EntityUnAuthorised.vue');
+const ForgotMyPasswordView = async () =>
+	await import('@/features/core/auth/views/ForgotMyPasswordView.vue');
+const MainHeader = async () => await import('@/app/components/MainHeader/MainHeader.vue');
+const MainSidebar = async () => await import('@/app/components/MainSidebar.vue');
+const LogsPanel = async () => await import('@/features/execution/logs/components/LogsPanel.vue');
+const DemoFooter = async () => await import('@/features/execution/logs/components/DemoFooter.vue');
+const NodeView = async () => await import('@/app/views/NodeView.vue');
+const WorkflowExecutionsView = async () =>
+	await import('@/features/execution/executions/views/WorkflowExecutionsView.vue');
 const WorkflowExecutionsLandingPage = async () =>
-	await import('@/components/executions/workflow/WorkflowExecutionsLandingPage.vue');
+	await import(
+		'@/features/execution/executions/components/workflow/WorkflowExecutionsLandingPage.vue'
+	);
 const WorkflowExecutionsPreview = async () =>
-	await import('@/components/executions/workflow/WorkflowExecutionsPreview.vue');
-const SettingsView = async () => await import('./views/SettingsView.vue');
-const SettingsLdapView = async () => await import('./views/SettingsLdapView.vue');
-const SettingsPersonalView = async () => await import('./views/SettingsPersonalView.vue');
-const SettingsUsersView = async () => await import('./views/SettingsUsersView.vue');
+	await import('@/features/execution/executions/components/workflow/WorkflowExecutionsPreview.vue');
+const SettingsView = async () => await import('@/app/views/SettingsView.vue');
+const SettingsLdapView = async () =>
+	await import('@/features/settings/sso/views/SettingsLdapView.vue');
+const SettingsPersonalView = async () =>
+	await import('@/features/core/auth/views/SettingsPersonalView.vue');
+const SettingsUsersView = async () =>
+	await import('@/features/settings/users/views/SettingsUsersView.vue');
 const SettingsCommunityNodesView = async () =>
-	await import('./views/SettingsCommunityNodesView.vue');
-const SettingsApiView = async () => await import('./views/SettingsApiView.vue');
-const SettingsLogStreamingView = async () => await import('./views/SettingsLogStreamingView.vue');
-const SetupView = async () => await import('./views/SetupView.vue');
-const SigninView = async () => await import('./views/SigninView.vue');
-const SignupView = async () => await import('./views/SignupView.vue');
-const TemplatesCollectionView = async () => await import('@/views/TemplatesCollectionView.vue');
-const TemplatesWorkflowView = async () => await import('@/views/TemplatesWorkflowView.vue');
+	await import('@/features/settings/communityNodes/views/SettingsCommunityNodesView.vue');
+const SettingsApiView = async () =>
+	await import('@/features/settings/apiKeys/views/SettingsApiView.vue');
+const SettingsLogStreamingView = async () =>
+	await import('@/features/integrations/logStreaming.ee/views/SettingsLogStreamingView.vue');
+const SetupView = async () => await import('@/features/core/auth/views/SetupView.vue');
+const SigninView = async () => await import('@/features/core/auth/views/SigninView.vue');
+const SignupView = async () => await import('@/features/core/auth/views/SignupView.vue');
+const TemplatesCollectionView = async () =>
+	await import('@/features/workflows/templates/views/TemplatesCollectionView.vue');
+const TemplatesWorkflowView = async () =>
+	await import('@/features/workflows/templates/views/TemplatesWorkflowView.vue');
 const SetupWorkflowFromTemplateView = async () =>
-	await import('@/views/SetupWorkflowFromTemplateView/SetupWorkflowFromTemplateView.vue');
-const TemplatesSearchView = async () => await import('@/views/TemplatesSearchView.vue');
-const VariablesView = async () => await import('@/views/VariablesView.vue');
-const SettingsUsageAndPlan = async () => await import('./views/SettingsUsageAndPlan.vue');
-const SettingsSso = async () => await import('./views/SettingsSso.vue');
-const SignoutView = async () => await import('@/views/SignoutView.vue');
-const SamlOnboarding = async () => await import('@/views/SamlOnboarding.vue');
-const SettingsSourceControl = async () => await import('./views/SettingsSourceControl.vue');
-const SettingsExternalSecrets = async () => await import('./views/SettingsExternalSecrets.vue');
-const WorkerView = async () => await import('./views/WorkerView.vue');
-const WorkflowHistory = async () => await import('@/views/WorkflowHistory.vue');
-const WorkflowOnboardingView = async () => await import('@/views/WorkflowOnboardingView.vue');
-const TestDefinitionListView = async () =>
-	await import('./views/TestDefinition/TestDefinitionListView.vue');
-const TestDefinitionNewView = async () =>
-	await import('./views/TestDefinition/TestDefinitionNewView.vue');
-const TestDefinitionEditView = async () =>
-	await import('./views/TestDefinition/TestDefinitionEditView.vue');
-const TestDefinitionRootView = async () =>
-	await import('./views/TestDefinition/TestDefinitionRootView.vue');
+	await import('@/features/workflows/templates/views/SetupWorkflowFromTemplateView.vue');
+const TemplatesSearchView = async () =>
+	await import('@/features/workflows/templates/views/TemplatesSearchView.vue');
+const SettingsUsageAndPlan = async () =>
+	await import('@/features/settings/usage/views/SettingsUsageAndPlan.vue');
+const SettingsSso = async () => await import('@/features/settings/sso/views/SettingsSso.vue');
+const SignoutView = async () => await import('@/features/core/auth/views/SignoutView.vue');
+const SamlOnboarding = async () => await import('@/features/settings/sso/views/SamlOnboarding.vue');
+const SettingsSourceControl = async () =>
+	await import('@/features/integrations/sourceControl.ee/views/SettingsSourceControl.vue');
+const SettingsExternalSecrets = async () =>
+	await import('@/features/integrations/externalSecrets.ee/views/SettingsExternalSecrets.vue');
+const SettingsProvisioningView = async () =>
+	await import('@/features/settings/provisioning/views/SettingsProvisioningView.vue');
+const WorkerView = async () =>
+	await import('@/features/settings/orchestration.ee/views/WorkerView.vue');
+const WorkflowHistory = async () =>
+	await import('@/features/workflows/workflowHistory/views/WorkflowHistory.vue');
+const WorkflowOnboardingView = async () => await import('@/app/views/WorkflowOnboardingView.vue');
+const EvaluationsView = async () =>
+	await import('@/features/ai/evaluation.ee/views/EvaluationsView.vue');
+const TestRunDetailView = async () =>
+	await import('@/features/ai/evaluation.ee/views/TestRunDetailView.vue');
+const EvaluationRootView = async () =>
+	await import('@/features/ai/evaluation.ee/views/EvaluationsRootView.vue');
+const PrebuiltAgentTemplatesView = async () =>
+	await import('@/app/views/PrebuiltAgentTemplatesView.vue');
 
 function getTemplatesRedirect(defaultRedirect: VIEWS[keyof VIEWS]): { name: string } | false {
 	const settingsStore = useSettingsStore();
@@ -106,6 +130,29 @@ export const routes: RouteRecordRaw[] = [
 			},
 			getRedirect: getTemplatesRedirect,
 			middleware: ['authenticated'],
+		},
+	},
+	{
+		path: '/templates/agents',
+		name: VIEWS.PRE_BUILT_AGENT_TEMPLATES,
+		components: {
+			default: PrebuiltAgentTemplatesView,
+			sidebar: MainSidebar,
+		},
+		meta: {
+			templatesEnabled: true,
+			getRedirect: getTemplatesRedirect,
+			middleware: ['authenticated'],
+		},
+		beforeEnter: (_to, _from, next) => {
+			const calloutHelpers = useCalloutHelpers();
+			const templatesStore = useTemplatesStore();
+
+			if (!calloutHelpers.isPreBuiltAgentsCalloutVisible.value) {
+				window.location.href = templatesStore.websiteTemplateRepositoryURL;
+			} else {
+				next();
+			}
 		},
 	},
 	// Following two routes are kept in-app:
@@ -195,21 +242,13 @@ export const routes: RouteRecordRaw[] = [
 		},
 	},
 	{
-		path: '/variables',
-		name: VIEWS.VARIABLES,
-		components: {
-			default: VariablesView,
-			sidebar: MainSidebar,
-		},
-		meta: { middleware: ['authenticated'] },
-	},
-	{
 		path: '/workflow/:name/debug/:executionId',
 		name: VIEWS.EXECUTION_DEBUG,
 		components: {
 			default: NodeView,
 			header: MainHeader,
 			sidebar: MainSidebar,
+			footer: LogsPanel,
 		},
 		meta: {
 			nodeView: true,
@@ -247,7 +286,7 @@ export const routes: RouteRecordRaw[] = [
 				},
 			},
 			{
-				path: ':executionId',
+				path: ':executionId/:nodeId?',
 				name: VIEWS.EXECUTION_PREVIEW,
 				components: {
 					executionPreview: WorkflowExecutionsPreview,
@@ -261,47 +300,31 @@ export const routes: RouteRecordRaw[] = [
 	},
 	{
 		path: '/workflow/:name/evaluation',
+		name: VIEWS.EVALUATION,
 		components: {
-			default: TestDefinitionRootView,
+			default: EvaluationRootView,
 			header: MainHeader,
 			sidebar: MainSidebar,
 		},
-		props: true,
+		props: {
+			default: true,
+		},
 		meta: {
 			keepWorkflowAlive: true,
-			middleware: ['authenticated', 'custom'],
-			middlewareOptions: {
-				custom: () => useTestDefinitionStore().isFeatureEnabled,
-			},
+			middleware: ['authenticated'],
 		},
 		children: [
 			{
 				path: '',
-				name: VIEWS.TEST_DEFINITION,
-				component: TestDefinitionListView,
+				name: VIEWS.EVALUATION_EDIT,
+				component: EvaluationsView,
 				props: true,
 			},
 			{
-				path: 'new',
-				name: VIEWS.NEW_TEST_DEFINITION,
-				component: TestDefinitionNewView,
+				path: 'test-runs/:runId',
+				name: VIEWS.EVALUATION_RUNS_DETAIL,
+				component: TestRunDetailView,
 				props: true,
-			},
-			{
-				path: ':testId',
-				name: VIEWS.TEST_DEFINITION_EDIT,
-				props: true,
-				components: {
-					default: TestDefinitionEditView,
-				},
-			},
-			{
-				path: ':testId/runs/:runId',
-				name: VIEWS.TEST_DEFINITION_RUNS_DETAIL,
-				props: true,
-				components: {
-					default: TestDefinitionRunDetailView,
-				},
 			},
 		],
 	},
@@ -358,7 +381,7 @@ export const routes: RouteRecordRaw[] = [
 			default: NodeView,
 			header: MainHeader,
 			sidebar: MainSidebar,
-			footer: CanvasChatSwitch,
+			footer: LogsPanel,
 		},
 		meta: {
 			nodeView: true,
@@ -371,6 +394,7 @@ export const routes: RouteRecordRaw[] = [
 		name: VIEWS.DEMO,
 		components: {
 			default: NodeView,
+			footer: DemoFooter,
 		},
 		meta: {
 			middleware: ['authenticated'],
@@ -385,13 +409,13 @@ export const routes: RouteRecordRaw[] = [
 		},
 	},
 	{
-		path: '/workflow/:name',
+		path: '/workflow/:name/:nodeId?',
 		name: VIEWS.WORKFLOW,
 		components: {
 			default: NodeView,
 			header: MainHeader,
 			sidebar: MainSidebar,
-			footer: CanvasChatSwitch,
+			footer: LogsPanel,
 		},
 		meta: {
 			nodeView: true,
@@ -560,6 +584,48 @@ export const routes: RouteRecordRaw[] = [
 				},
 			},
 			{
+				path: 'project-roles',
+				components: {
+					settingsView: RouterView,
+				},
+				children: [
+					{
+						path: '',
+						name: VIEWS.PROJECT_ROLES_SETTINGS,
+						component: async () => await import('@/features/project-roles/ProjectRolesView.vue'),
+					},
+					{
+						path: 'new',
+						name: VIEWS.PROJECT_NEW_ROLE,
+						component: async () => await import('@/features/project-roles/ProjectRoleView.vue'),
+					},
+					{
+						path: 'edit/:roleSlug',
+						name: VIEWS.PROJECT_ROLE_SETTINGS,
+						component: async () => await import('@/features/project-roles/ProjectRoleView.vue'),
+					},
+				],
+				meta: {
+					middleware: ['authenticated', 'rbac', 'custom'],
+					middlewareOptions: {
+						rbac: {
+							scope: ['role:manage'],
+						},
+						custom: () => {
+							return useEnvFeatureFlag().check.value('CUSTOM_ROLES');
+						},
+					},
+					telemetry: {
+						pageCategory: 'settings',
+						getProperties() {
+							return {
+								feature: 'project-roles',
+							};
+						},
+					},
+				},
+			},
+			{
 				path: 'api',
 				name: VIEWS.API_SETTINGS,
 				components: {
@@ -711,6 +777,32 @@ export const routes: RouteRecordRaw[] = [
 					},
 				},
 			},
+			{
+				path: 'provisioning',
+				name: VIEWS.PROVISIONING_SETTINGS,
+				components: {
+					settingsView: SettingsProvisioningView,
+				},
+				meta: {
+					middleware: ['authenticated', 'enterprise', 'rbac'],
+					middlewareOptions: {
+						enterprise: {
+							feature: 'provisioning',
+						},
+						rbac: {
+							scope: 'provisioning:manage',
+						},
+					},
+					telemetry: {
+						pageCategory: 'settings',
+						getProperties() {
+							return {
+								feature: 'provisioning',
+							};
+						},
+					},
+				},
+			},
 		],
 	},
 	{
@@ -734,6 +826,24 @@ export const routes: RouteRecordRaw[] = [
 		},
 	},
 	...projectsRoutes,
+	{
+		path: '/entity-not-found/:entityType(credential|workflow)',
+		props: true,
+		name: VIEWS.ENTITY_NOT_FOUND,
+		components: {
+			default: EntityNotFound,
+			sidebar: MainSidebar,
+		},
+	},
+	{
+		path: '/entity-not-authorized/:entityType(credential|workflow)',
+		props: true,
+		name: VIEWS.ENTITY_UNAUTHORIZED,
+		components: {
+			default: EntityUnAuthorised,
+			sidebar: MainSidebar,
+		},
+	},
 	{
 		path: '/:pathMatch(.*)*',
 		name: VIEWS.NOT_FOUND,
@@ -786,7 +896,8 @@ router.beforeEach(async (to: RouteLocationNormalized, from, next) => {
 		 */
 
 		await initializeCore();
-		await initializeAuthenticatedFeatures();
+		// Pass undefined for first param to use default
+		await initializeAuthenticatedFeatures(undefined, to.name as string);
 
 		/**
 		 * Redirect to setup page. User should be redirected to this only once
@@ -825,6 +936,14 @@ router.beforeEach(async (to: RouteLocationNormalized, from, next) => {
 
 		return next();
 	} catch (failure) {
+		const settingsStore = useSettingsStore();
+		if (failure instanceof MfaRequiredError && settingsStore.isMFAEnforced) {
+			if (to.name !== VIEWS.PERSONAL_SETTINGS) {
+				return next({ name: VIEWS.PERSONAL_SETTINGS });
+			} else {
+				return next();
+			}
+		}
 		if (isNavigationFailure(failure)) {
 			console.log(failure);
 		} else {
@@ -856,6 +975,9 @@ router.afterEach((to, from) => {
 			templatesStore.resetSessionId(); // reset telemetry session id when user leaves template pages
 		}
 		telemetry.page(to);
+
+		const { trackResourceOpened } = useRecentResources();
+		trackResourceOpened(to);
 	} catch (failure) {
 		if (isNavigationFailure(failure)) {
 			console.log(failure);

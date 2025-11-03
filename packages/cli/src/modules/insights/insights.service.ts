@@ -1,226 +1,80 @@
-import type { InsightsSummary } from '@n8n/api-types';
-import { Container, Service } from '@n8n/di';
-import type { ExecutionLifecycleHooks } from 'n8n-core';
-import {
-	UnexpectedError,
-	type ExecutionStatus,
-	type IRun,
-	type WorkflowExecuteMode,
-} from 'n8n-workflow';
+import { type InsightsSummary } from '@n8n/api-types';
+import { LicenseState, Logger } from '@n8n/backend-common';
+import { OnLeaderStepdown, OnLeaderTakeover } from '@n8n/decorators';
+import { Service } from '@n8n/di';
+import { DateTime } from 'luxon';
+import { InstanceSettings } from 'n8n-core';
+import { UserError } from 'n8n-workflow';
 
-import { SharedWorkflow } from '@/databases/entities/shared-workflow';
-import { SharedWorkflowRepository } from '@/databases/repositories/shared-workflow.repository';
-import { OnShutdown } from '@/decorators/on-shutdown';
-import { InsightsMetadata } from '@/modules/insights/database/entities/insights-metadata';
-import { InsightsRaw } from '@/modules/insights/database/entities/insights-raw';
-
-import type { TypeUnit } from './database/entities/insights-shared';
-import { NumberToType } from './database/entities/insights-shared';
+import type { PeriodUnit, TypeUnit } from './database/entities/insights-shared';
+import { NumberToType, TypeToNumber } from './database/entities/insights-shared';
 import { InsightsByPeriodRepository } from './database/repositories/insights-by-period.repository';
-import { InsightsRawRepository } from './database/repositories/insights-raw.repository';
-import { InsightsConfig } from './insights.config';
-
-const config = Container.get(InsightsConfig);
-
-const shouldSkipStatus: Record<ExecutionStatus, boolean> = {
-	success: false,
-	crashed: false,
-	error: false,
-
-	canceled: true,
-	new: true,
-	running: true,
-	unknown: true,
-	waiting: true,
-};
-
-const shouldSkipMode: Record<WorkflowExecuteMode, boolean> = {
-	cli: false,
-	error: false,
-	integrated: false,
-	retry: false,
-	trigger: false,
-	webhook: false,
-	evaluation: false,
-
-	internal: true,
-	manual: true,
-};
+import { InsightsCollectionService } from './insights-collection.service';
+import { InsightsCompactionService } from './insights-compaction.service';
+import { InsightsPruningService } from './insights-pruning.service';
+import { INSIGHTS_DATE_RANGE_KEYS, keyRangeToDays } from './insights.constants';
 
 @Service()
 export class InsightsService {
-	private readonly maxAgeInDaysForHourlyData = 90;
-
-	private readonly maxAgeInDaysForDailyData = 180;
-
-	private compactInsightsTimer: NodeJS.Timer | undefined;
-
 	constructor(
-		private readonly sharedWorkflowRepository: SharedWorkflowRepository,
 		private readonly insightsByPeriodRepository: InsightsByPeriodRepository,
-		private readonly insightsRawRepository: InsightsRawRepository,
+		private readonly compactionService: InsightsCompactionService,
+		private readonly collectionService: InsightsCollectionService,
+		private readonly pruningService: InsightsPruningService,
+		private readonly licenseState: LicenseState,
+		private readonly instanceSettings: InstanceSettings,
+		private readonly logger: Logger,
 	) {
-		this.initializeCompaction();
+		this.logger = this.logger.scoped('insights');
 	}
 
-	initializeCompaction() {
-		if (this.compactInsightsTimer !== undefined) {
-			clearInterval(this.compactInsightsTimer);
+	settings() {
+		return {
+			summary: this.licenseState.isInsightsSummaryLicensed(),
+			dashboard: this.licenseState.isInsightsDashboardLicensed(),
+			dateRanges: this.getAvailableDateRanges(),
+		};
+	}
+
+	startTimers() {
+		this.collectionService.startFlushingTimer();
+
+		if (this.instanceSettings.isLeader) this.startCompactionAndPruningTimers();
+	}
+
+	@OnLeaderTakeover()
+	startCompactionAndPruningTimers() {
+		this.compactionService.startCompactionTimer();
+		if (this.pruningService.isPruningEnabled) {
+			this.pruningService.startPruningTimer();
 		}
-		const intervalMilliseconds = config.compactionIntervalMinutes * 60 * 1000;
-		this.compactInsightsTimer = setInterval(
-			async () => await this.compactInsights(),
-			intervalMilliseconds,
-		);
 	}
 
-	@OnShutdown()
-	shutdown() {
-		if (this.compactInsightsTimer !== undefined) {
-			clearInterval(this.compactInsightsTimer);
-			this.compactInsightsTimer = undefined;
-		}
+	@OnLeaderStepdown()
+	stopCompactionAndPruningTimers() {
+		this.compactionService.stopCompactionTimer();
+		this.pruningService.stopPruningTimer();
 	}
 
-	async workflowExecuteAfterHandler(ctx: ExecutionLifecycleHooks, fullRunData: IRun) {
-		if (shouldSkipStatus[fullRunData.status] || shouldSkipMode[fullRunData.mode]) {
-			return;
-		}
+	async shutdown() {
+		await this.collectionService.shutdown();
+		this.stopCompactionAndPruningTimers();
+	}
 
-		const status = fullRunData.status === 'success' ? 'success' : 'failure';
-
-		await this.sharedWorkflowRepository.manager.transaction(async (trx) => {
-			const sharedWorkflow = await trx.findOne(SharedWorkflow, {
-				where: { workflowId: ctx.workflowData.id, role: 'workflow:owner' },
-				relations: { project: true },
-			});
-
-			if (!sharedWorkflow) {
-				throw new UnexpectedError(
-					`Could not find an owner for the workflow with the name '${ctx.workflowData.name}' and the id '${ctx.workflowData.id}'`,
-				);
-			}
-
-			await trx.upsert(
-				InsightsMetadata,
-				{
-					workflowId: ctx.workflowData.id,
-					workflowName: ctx.workflowData.name,
-					projectId: sharedWorkflow.projectId,
-					projectName: sharedWorkflow.project.name,
-				},
-				['workflowId'],
-			);
-			const metadata = await trx.findOneBy(InsightsMetadata, {
-				workflowId: ctx.workflowData.id,
-			});
-
-			if (!metadata) {
-				// This can't happen, we just wrote the metadata in the same
-				// transaction.
-				throw new UnexpectedError(
-					`Could not find metadata for the workflow with the id '${ctx.workflowData.id}'`,
-				);
-			}
-
-			// success or failure event
-			{
-				const event = new InsightsRaw();
-				event.metaId = metadata.metaId;
-				event.type = status;
-				event.value = 1;
-				await trx.insert(InsightsRaw, event);
-			}
-
-			// run time event
-			if (fullRunData.stoppedAt) {
-				const value = fullRunData.stoppedAt.getTime() - fullRunData.startedAt.getTime();
-				const event = new InsightsRaw();
-				event.metaId = metadata.metaId;
-				event.type = 'runtime_ms';
-				event.value = value;
-				await trx.insert(InsightsRaw, event);
-			}
-
-			// time saved event
-			if (status === 'success' && ctx.workflowData.settings?.timeSavedPerExecution) {
-				const event = new InsightsRaw();
-				event.metaId = metadata.metaId;
-				event.type = 'time_saved_min';
-				event.value = ctx.workflowData.settings.timeSavedPerExecution;
-				await trx.insert(InsightsRaw, event);
-			}
+	async getInsightsSummary({
+		startDate,
+		endDate,
+		projectId,
+	}: {
+		projectId?: string;
+		startDate: Date;
+		endDate: Date;
+	}): Promise<InsightsSummary> {
+		const rows = await this.insightsByPeriodRepository.getPreviousAndCurrentPeriodTypeAggregates({
+			startDate,
+			endDate,
+			projectId,
 		});
-	}
-
-	async compactInsights() {
-		let numberOfCompactedRawData: number;
-
-		// Compact raw data to hourly aggregates
-		do {
-			numberOfCompactedRawData = await this.compactRawToHour();
-		} while (numberOfCompactedRawData > 0);
-
-		let numberOfCompactedHourData: number;
-
-		// Compact hourly data to daily aggregates
-		do {
-			numberOfCompactedHourData = await this.compactHourToDay();
-		} while (numberOfCompactedHourData > 0);
-
-		let numberOfCompactedDayData: number;
-		// Compact daily data to weekly aggregates
-		do {
-			numberOfCompactedDayData = await this.compactDayToWeek();
-		} while (numberOfCompactedDayData > 0);
-	}
-
-	// Compacts raw data to hourly aggregates
-	async compactRawToHour() {
-		// Build the query to gather raw insights data for the batch
-		const batchQuery = this.insightsRawRepository.getRawInsightsBatchQuery(
-			config.compactionBatchSize,
-		);
-
-		return await this.insightsByPeriodRepository.compactSourceDataIntoInsightPeriod({
-			sourceBatchQuery: batchQuery,
-			sourceTableName: this.insightsRawRepository.metadata.tableName,
-			periodUnitToCompactInto: 'hour',
-		});
-	}
-
-	// Compacts hourly data to daily aggregates
-	async compactHourToDay() {
-		// get hour data query for batching
-		const batchQuery = this.insightsByPeriodRepository.getPeriodInsightsBatchQuery({
-			periodUnitToCompactFrom: 'hour',
-			compactionBatchSize: config.compactionBatchSize,
-			maxAgeInDays: this.maxAgeInDaysForHourlyData,
-		});
-
-		return await this.insightsByPeriodRepository.compactSourceDataIntoInsightPeriod({
-			sourceBatchQuery: batchQuery,
-			periodUnitToCompactInto: 'day',
-		});
-	}
-
-	// Compacts daily data to weekly aggregates
-	async compactDayToWeek() {
-		// get daily data query for batching
-		const batchQuery = this.insightsByPeriodRepository.getPeriodInsightsBatchQuery({
-			periodUnitToCompactFrom: 'day',
-			compactionBatchSize: config.compactionBatchSize,
-			maxAgeInDays: this.maxAgeInDaysForDailyData,
-		});
-
-		return await this.insightsByPeriodRepository.compactSourceDataIntoInsightPeriod({
-			sourceBatchQuery: batchQuery,
-			periodUnitToCompactInto: 'week',
-		});
-	}
-
-	async getInsightsSummary(): Promise<InsightsSummary> {
-		const rows = await this.insightsByPeriodRepository.getPreviousAndCurrentPeriodTypeAggregates();
 
 		// Initialize data structures for both periods
 		const data = {
@@ -250,9 +104,9 @@ export class InsightsService {
 		const previousTotal = previousSuccesses + previousFailures;
 
 		const currentFailureRate =
-			currentTotal > 0 ? Math.round((currentFailures / currentTotal) * 100) / 100 : 0;
+			currentTotal > 0 ? Math.round((currentFailures / currentTotal) * 1000) / 1000 : 0;
 		const previousFailureRate =
-			previousTotal > 0 ? Math.round((previousFailures / previousTotal) * 100) / 100 : 0;
+			previousTotal > 0 ? Math.round((previousFailures / previousTotal) * 1000) / 1000 : 0;
 
 		const currentTotalRuntime = getValueByType('current', 'runtime_ms') ?? 0;
 		const previousTotalRuntime = getValueByType('previous', 'runtime_ms') ?? 0;
@@ -273,7 +127,7 @@ export class InsightsService {
 		const result: InsightsSummary = {
 			averageRunTime: {
 				value: currentAvgRuntime,
-				unit: 'time',
+				unit: 'millisecond',
 				deviation: getDeviation(currentAvgRuntime, previousAvgRuntime),
 			},
 			failed: {
@@ -288,7 +142,7 @@ export class InsightsService {
 			},
 			timeSaved: {
 				value: currentTimeSaved,
-				unit: 'time',
+				unit: 'minute',
 				deviation: getDeviation(currentTimeSaved, previousTimeSaved),
 			},
 			total: {
@@ -300,4 +154,153 @@ export class InsightsService {
 
 		return result;
 	}
+
+	async getInsightsByWorkflow({
+		skip = 0,
+		take = 10,
+		sortBy = 'total:desc',
+		projectId,
+		startDate,
+		endDate,
+	}: {
+		skip?: number;
+		take?: number;
+		sortBy?: string;
+		projectId?: string;
+		startDate: Date;
+		endDate: Date;
+	}) {
+		const { count, rows } = await this.insightsByPeriodRepository.getInsightsByWorkflow({
+			startDate,
+			endDate,
+			skip,
+			take,
+			sortBy,
+			projectId,
+		});
+
+		return {
+			count,
+			data: rows,
+		};
+	}
+
+	async getInsightsByTime({
+		// Default to all insight types
+		insightTypes = Object.keys(TypeToNumber) as TypeUnit[],
+		projectId,
+		startDate,
+		endDate,
+	}: {
+		insightTypes?: TypeUnit[];
+		projectId?: string;
+		startDate: Date;
+		endDate: Date;
+	}) {
+		const periodUnit = this.getDateFiltersGranularity({ startDate, endDate });
+		const rows = await this.insightsByPeriodRepository.getInsightsByTime({
+			periodUnit,
+			insightTypes,
+			projectId,
+			startDate,
+			endDate,
+		});
+
+		return rows.map((r) => {
+			const { periodStart, runTime, ...rest } = r;
+			const values: typeof rest & {
+				total?: number;
+				successRate?: number;
+				failureRate?: number;
+				averageRunTime?: number;
+			} = rest;
+
+			// Compute ratio if total has been computed
+			if (typeof r.succeeded === 'number' && typeof r.failed === 'number') {
+				const total = r.succeeded + r.failed;
+				values.total = total;
+				values.failureRate = total ? r.failed / total : 0;
+				if (typeof runTime === 'number') {
+					values.averageRunTime = total ? runTime / total : 0;
+				}
+			}
+			return {
+				date: r.periodStart,
+				values,
+			};
+		});
+	}
+
+	/**
+	 * Checks if the selected date range is compliant with the license
+	 *
+	 * - If the granularity is 'hour', checks if the license allows hourly data access
+	 * - Checks if the start date is within the allowed history range
+	 *
+	 * @throws {UserError} if the license does not allow the selected date range
+	 */
+	validateDateFiltersLicense({ startDate, endDate }: { startDate: Date; endDate: Date }) {
+		// we use `startOf('day')` because the license limits are based on full days
+		const today = DateTime.now().startOf('day');
+		const startDateStartOfDay = DateTime.fromJSDate(startDate).startOf('day');
+		const daysToStartDate = today.diff(startDateStartOfDay, 'days').days;
+
+		const granularity = this.getDateFiltersGranularity({ startDate, endDate });
+
+		const maxHistoryInDays =
+			this.licenseState.getInsightsMaxHistory() === -1
+				? Number.MAX_SAFE_INTEGER
+				: this.licenseState.getInsightsMaxHistory();
+		const isHourlyDateLicensed = this.licenseState.isInsightsHourlyDataLicensed();
+
+		if (granularity === 'hour' && !isHourlyDateLicensed) {
+			throw new UserError('Hourly data is not available with your current license');
+		}
+
+		if (maxHistoryInDays < daysToStartDate) {
+			throw new UserError(
+				'The selected date range exceeds the maximum history allowed by your license',
+			);
+		}
+	}
+
+	private getDateFiltersGranularity({
+		startDate,
+		endDate,
+	}: { startDate: Date; endDate: Date }): PeriodUnit {
+		const startDateTime = DateTime.fromJSDate(startDate);
+		const endDateTime = DateTime.fromJSDate(endDate);
+		const differenceInDays = endDateTime.diff(startDateTime, 'days').days;
+
+		if (differenceInDays < 1) {
+			return 'hour';
+		}
+
+		if (differenceInDays <= 30) {
+			return 'day';
+		}
+
+		return 'week';
+	}
+
+	private getAvailableDateRanges(): DateRange[] {
+		const maxHistoryInDays =
+			this.licenseState.getInsightsMaxHistory() === -1
+				? Number.MAX_SAFE_INTEGER
+				: this.licenseState.getInsightsMaxHistory();
+		const isHourlyDateLicensed = this.licenseState.isInsightsHourlyDataLicensed();
+
+		return INSIGHTS_DATE_RANGE_KEYS.map((key) => ({
+			key,
+			licensed:
+				key === 'day' ? (isHourlyDateLicensed ?? false) : maxHistoryInDays >= keyRangeToDays[key],
+			granularity: key === 'day' ? 'hour' : keyRangeToDays[key] <= 30 ? 'day' : 'week',
+		}));
+	}
 }
+
+type DateRange = {
+	key: 'day' | 'week' | '2weeks' | 'month' | 'quarter' | '6months' | 'year';
+	licensed: boolean;
+	granularity: 'hour' | 'day' | 'week';
+};

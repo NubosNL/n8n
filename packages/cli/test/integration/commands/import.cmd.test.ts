@@ -1,20 +1,27 @@
+import {
+	mockInstance,
+	testDb,
+	getPersonalProject,
+	getAllSharedWorkflows,
+	getAllWorkflows,
+} from '@n8n/backend-test-utils';
 import { nanoid } from 'nanoid';
 
+import '@/zod-alias-support';
+import { ActiveWorkflowManager } from '@/active-workflow-manager';
 import { ImportWorkflowsCommand } from '@/commands/import/workflow';
 import { LoadNodesAndCredentials } from '@/load-nodes-and-credentials';
 import { setupTestCommand } from '@test-integration/utils/test-command';
 
-import { mockInstance } from '../../shared/mocking';
-import { getPersonalProject } from '../shared/db/projects';
 import { createMember, createOwner } from '../shared/db/users';
-import { getAllSharedWorkflows, getAllWorkflows } from '../shared/db/workflows';
-import * as testDb from '../shared/test-db';
 
 mockInstance(LoadNodesAndCredentials);
+mockInstance(ActiveWorkflowManager);
+
 const command = setupTestCommand(ImportWorkflowsCommand);
 
 beforeEach(async () => {
-	await testDb.truncate(['Workflow', 'SharedWorkflow', 'User']);
+	await testDb.truncate(['WorkflowEntity', 'SharedWorkflow', 'User']);
 });
 
 test('import:workflow should import active workflow and deactivate it', async () => {
